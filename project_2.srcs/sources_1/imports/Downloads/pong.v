@@ -1,8 +1,3 @@
-//////////////////////////////////////////////////////////////////////////////
-// Basic Pong for Spartan-7 FPGA
-// Single-file implementation with VGA output (640x480 @ 60Hz)
-//////////////////////////////////////////////////////////////////////////////
-
 module pong (
     input  wire       clk,          // 100MHz system clock
     input  wire       rst,          // Active-high reset
@@ -17,9 +12,6 @@ module pong (
     output wire [3:0] vga_b         // VGA blue
 );
 
-    //--------------------------------------------------------------------------
-    // Clock divider: 100MHz -> 25MHz pixel clock
-    //--------------------------------------------------------------------------
     reg [1:0] clk_div;
     wire pix_clk = clk_div[1];
     
@@ -30,9 +22,6 @@ module pong (
             clk_div <= clk_div + 1;
     end
 
-    //--------------------------------------------------------------------------
-    // VGA Timing Parameters (640x480 @ 60Hz)
-    //--------------------------------------------------------------------------
     localparam H_DISPLAY    = 640;
     localparam H_FRONT      = 16;
     localparam H_SYNC       = 96;
@@ -45,9 +34,6 @@ module pong (
     localparam V_BACK       = 33;
     localparam V_TOTAL      = V_DISPLAY + V_FRONT + V_SYNC + V_BACK; // 525
 
-    //--------------------------------------------------------------------------
-    // VGA Sync Generator
-    //--------------------------------------------------------------------------
     reg [9:0] h_count;
     reg [9:0] v_count;
     
@@ -77,9 +63,6 @@ module pong (
     assign vsync = ~((v_count >= V_DISPLAY + V_FRONT) && 
                      (v_count < V_DISPLAY + V_FRONT + V_SYNC));
 
-    //--------------------------------------------------------------------------
-    // Game Parameters
-    //--------------------------------------------------------------------------
     localparam PADDLE_WIDTH  = 8;
     localparam PADDLE_HEIGHT = 60;
     localparam PADDLE_SPEED  = 3;
@@ -89,9 +72,6 @@ module pong (
     localparam P1_X = 20;                      // Left paddle X position
     localparam P2_X = H_DISPLAY - 20 - PADDLE_WIDTH; // Right paddle X position
 
-    //--------------------------------------------------------------------------
-    // Game State Registers
-    //--------------------------------------------------------------------------
     reg [9:0] p1_y;           // Player 1 paddle Y
     reg [9:0] p2_y;           // Player 2 paddle Y
     reg [9:0] ball_x;         // Ball X position
@@ -99,14 +79,8 @@ module pong (
     reg       ball_dx;        // Ball X direction (0=left, 1=right)
     reg       ball_dy;        // Ball Y direction (0=up, 1=down)
 
-    //--------------------------------------------------------------------------
-    // Frame tick (once per frame for game logic)
-    //--------------------------------------------------------------------------
     wire frame_tick = (h_count == 0) && (v_count == V_DISPLAY);
 
-    //--------------------------------------------------------------------------
-    // Slow down game updates
-    //--------------------------------------------------------------------------
     reg [3:0] frame_count;
     wire game_tick = frame_tick && (frame_count == 0);
     
@@ -117,9 +91,6 @@ module pong (
             frame_count <= frame_count + 1;
     end
 
-    //--------------------------------------------------------------------------
-    // Paddle Movement
-    //--------------------------------------------------------------------------
     always @(posedge pix_clk or posedge rst) begin
         if (rst) begin
             p1_y <= (V_DISPLAY - PADDLE_HEIGHT) / 2;
@@ -139,9 +110,6 @@ module pong (
         end
     end
 
-    //--------------------------------------------------------------------------
-    // Ball Movement & Collision
-    //--------------------------------------------------------------------------
     always @(posedge pix_clk or posedge rst) begin
         if (rst) begin
             ball_x  <= H_DISPLAY / 2;
@@ -188,9 +156,6 @@ module pong (
         end
     end
 
-    //--------------------------------------------------------------------------
-    // Graphics Rendering
-    //--------------------------------------------------------------------------
     wire draw_p1_paddle = (h_count >= P1_X) && (h_count < P1_X + PADDLE_WIDTH) &&
                           (v_count >= p1_y) && (v_count < p1_y + PADDLE_HEIGHT);
     
@@ -205,9 +170,6 @@ module pong (
                             (h_count < H_DISPLAY/2 + 1) &&
                             (v_count[4] == 1'b1);
 
-    //--------------------------------------------------------------------------
-    // VGA Output
-    //--------------------------------------------------------------------------
     wire [3:0] pixel_r, pixel_g, pixel_b;
     
     assign pixel_r = (draw_ball)        ? 4'hF :
