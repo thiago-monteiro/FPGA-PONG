@@ -78,6 +78,10 @@ module pong (
     reg [9:0] ball_y;         // Ball Y position
     reg       ball_dx;        // Ball X direction (0=left, 1=right)
     reg       ball_dy;        // Ball Y direction (0=up, 1=down)
+    
+    // Score tracking
+    reg [3:0] p1_score;       // Player 1 score (0-9)
+    reg [3:0] p2_score;       // Player 2 score (0-9)
 
     wire frame_tick = (h_count == 0) && (v_count == V_DISPLAY);
 
@@ -112,10 +116,12 @@ module pong (
 
     always @(posedge pix_clk or posedge rst) begin
         if (rst) begin
-            ball_x  <= H_DISPLAY / 2;
-            ball_y  <= V_DISPLAY / 2;
-            ball_dx <= 1;
-            ball_dy <= 1;
+            ball_x   <= H_DISPLAY / 2;
+            ball_y   <= V_DISPLAY / 2;
+            ball_dx  <= 1;
+            ball_dy  <= 1;
+            p1_score <= 0;
+            p2_score <= 0;
         end else if (game_tick) begin
             // Update ball position
             if (ball_dx)
@@ -148,10 +154,30 @@ module pong (
                 ball_y <= p2_y + PADDLE_HEIGHT)
                 ball_dx <= 0;
             
-            // Ball out of bounds - reset to center
-            if (ball_x <= BALL_SPEED || ball_x >= H_DISPLAY - BALL_SIZE - BALL_SPEED) begin
+            // Ball out on left - Player 2 scores
+            if (ball_x <= BALL_SPEED) begin
                 ball_x  <= H_DISPLAY / 2;
                 ball_y  <= V_DISPLAY / 2;
+                ball_dx <= 0;  // Serve towards player 1 (who lost)
+                if (p2_score == 4'd9) begin
+                    p1_score <= 0;
+                    p2_score <= 0;
+                end else begin
+                    p2_score <= p2_score + 1;
+                end
+            end
+            
+            // Ball out on right - Player 1 scores
+            if (ball_x >= H_DISPLAY - BALL_SIZE - BALL_SPEED) begin
+                ball_x  <= H_DISPLAY / 2;
+                ball_y  <= V_DISPLAY / 2;
+                ball_dx <= 1;  // Serve towards player 2 (who lost)
+                if (p1_score == 4'd9) begin
+                    p1_score <= 0;
+                    p2_score <= 0;
+                end else begin
+                    p1_score <= p1_score + 1;
+                end
             end
         end
     end
@@ -170,21 +196,106 @@ module pong (
                             (h_count < H_DISPLAY/2 + 1) &&
                             (v_count[4] == 1'b1);
 
+    // Digit dimensions
+    localparam DIGIT_WIDTH  = 32;
+    localparam DIGIT_HEIGHT = 48;
+    localparam SEG_THICK    = 4;
+    
+    // Score display positions (near top center, on each side)
+    localparam P1_SCORE_X = H_DISPLAY/2 - 60;  // Left of center
+    localparam P2_SCORE_X = H_DISPLAY/2 + 28;  // Right of center
+    localparam SCORE_Y    = 20;                // Top margin
+    
+    // 7-segment pattern: segments are A(top), B(top-right), C(bot-right), 
+    //                    D(bottom), E(bot-left), F(top-left), G(middle)
+    // Returns 1 if segment should be on for given digit (0-9)
+    function [6:0] digit_to_segments;
+        input [3:0] digit;
+        begin
+            case (digit)
+                4'd0: digit_to_segments = 7'b1111110;  // A,B,C,D,E,F
+                4'd1: digit_to_segments = 7'b0110000;  // B,C
+                4'd2: digit_to_segments = 7'b1101101;  // A,B,D,E,G
+                4'd3: digit_to_segments = 7'b1111001;  // A,B,C,D,G
+                4'd4: digit_to_segments = 7'b0110011;  // B,C,F,G
+                4'd5: digit_to_segments = 7'b1011011;  // A,C,D,F,G
+                4'd6: digit_to_segments = 7'b1011111;  // A,C,D,E,F,G
+                4'd7: digit_to_segments = 7'b1110000;  // A,B,C
+                4'd8: digit_to_segments = 7'b1111111;  // All segments
+                4'd9: digit_to_segments = 7'b1111011;  // A,B,C,D,F,G
+                default: digit_to_segments = 7'b0000000;
+            endcase
+        end
+    endfunction
+    
+    function is_segment_pixel;
+        input [9:0] dx;
+        input [9:0] dy;
+        input [6:0] segments;
+        reg seg_a, seg_b, seg_c, seg_d, seg_e, seg_f, seg_g;
+        begin
+            seg_a = segments[6];  // Top
+            seg_b = segments[5];  // Top-right
+            seg_c = segments[4];  // Bottom-right
+            seg_d = segments[3];  // Bottom
+            seg_e = segments[2];  // Bottom-left
+            seg_f = segments[1];  // Top-left
+            seg_g = segments[0];  // Middle
+            
+            is_segment_pixel = 
+                // Segment A (top horizontal)
+                (seg_a && dy < SEG_THICK && dx >= SEG_THICK && dx < DIGIT_WIDTH - SEG_THICK) ||
+                // Segment B (top-right vertical)
+                (seg_b && dx >= DIGIT_WIDTH - SEG_THICK && dy >= SEG_THICK && dy < DIGIT_HEIGHT/2) ||
+                // Segment C (bottom-right vertical)
+                (seg_c && dx >= DIGIT_WIDTH - SEG_THICK && dy >= DIGIT_HEIGHT/2 && dy < DIGIT_HEIGHT - SEG_THICK) ||
+                // Segment D (bottom horizontal)
+                (seg_d && dy >= DIGIT_HEIGHT - SEG_THICK && dx >= SEG_THICK && dx < DIGIT_WIDTH - SEG_THICK) ||
+                // Segment E (bottom-left vertical)
+                (seg_e && dx < SEG_THICK && dy >= DIGIT_HEIGHT/2 && dy < DIGIT_HEIGHT - SEG_THICK) ||
+                // Segment F (top-left vertical)
+                (seg_f && dx < SEG_THICK && dy >= SEG_THICK && dy < DIGIT_HEIGHT/2) ||
+                // Segment G (middle horizontal)
+                (seg_g && dy >= DIGIT_HEIGHT/2 - SEG_THICK/2 && dy < DIGIT_HEIGHT/2 + SEG_THICK/2 && 
+                 dx >= SEG_THICK && dx < DIGIT_WIDTH - SEG_THICK);
+        end
+    endfunction
+    
+    wire [9:0] p1_dx = h_count - P1_SCORE_X;
+    wire [9:0] p1_dy = v_count - SCORE_Y;
+    wire p1_in_digit = (h_count >= P1_SCORE_X) && (h_count < P1_SCORE_X + DIGIT_WIDTH) &&
+                       (v_count >= SCORE_Y) && (v_count < SCORE_Y + DIGIT_HEIGHT);
+    wire [6:0] p1_segs = digit_to_segments(p1_score);
+    wire draw_p1_score = p1_in_digit && is_segment_pixel(p1_dx, p1_dy, p1_segs);
+    
+    wire [9:0] p2_dx = h_count - P2_SCORE_X;
+    wire [9:0] p2_dy = v_count - SCORE_Y;
+    wire p2_in_digit = (h_count >= P2_SCORE_X) && (h_count < P2_SCORE_X + DIGIT_WIDTH) &&
+                       (v_count >= SCORE_Y) && (v_count < SCORE_Y + DIGIT_HEIGHT);
+    wire [6:0] p2_segs = digit_to_segments(p2_score);
+    wire draw_p2_score = p2_in_digit && is_segment_pixel(p2_dx, p2_dy, p2_segs);
+
     wire [3:0] pixel_r, pixel_g, pixel_b;
     
     assign pixel_r = (draw_ball)        ? 4'hF :
                      (draw_p1_paddle)   ? 4'hF :
                      (draw_p2_paddle)   ? 4'hF :
+                     (draw_p1_score)    ? 4'hF :
+                     (draw_p2_score)    ? 4'hF :
                      (draw_center_line) ? 4'h8 : 4'h0;
     
     assign pixel_g = (draw_ball)        ? 4'hF :
                      (draw_p1_paddle)   ? 4'hF :
                      (draw_p2_paddle)   ? 4'hF :
+                     (draw_p1_score)    ? 4'hF :
+                     (draw_p2_score)    ? 4'hF :
                      (draw_center_line) ? 4'h8 : 4'h0;
     
     assign pixel_b = (draw_ball)        ? 4'hF :
                      (draw_p1_paddle)   ? 4'hF :
                      (draw_p2_paddle)   ? 4'hF :
+                     (draw_p1_score)    ? 4'hF :
+                     (draw_p2_score)    ? 4'hF :
                      (draw_center_line) ? 4'h8 : 4'h0;
     
     assign vga_r = display_on ? pixel_r : 4'h0;
